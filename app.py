@@ -66,7 +66,8 @@ def search_stock(stock_name):
     conn = http.client.HTTPSConnection("google-news13.p.rapidapi.com")
 
     headers = {
-        'x-rapidapi-key': "f03bb60d60msh270dfa3b81fb47cp1db8c7jsnf50666b62fba",
+        # 'x-rapidapi-key': "f03bb60d60msh270dfa3b81fb47cp1db8c7jsnf50666b62fba",
+        'x-rapidapi-key': "702b824395mshaad8abc03259fa4p1901d9jsn83805da8ead7",
         'x-rapidapi-host': "google-news13.p.rapidapi.com"
     }
 
@@ -155,8 +156,8 @@ def news_sentiment(symbol):
     except Exception as e:
         return jsonify({"error": f"Failed to fetch news for {symbol}: {str(e)}"}), 500
 
-@app.route("/predict", methods=["POST"])
-def predict_open_close():
+@app.route('/predict_high_low', methods=['POST'])
+def predict_high_low():
     try:
         data = request.json
         symbol = data.get("symbol")
@@ -181,7 +182,7 @@ def predict_open_close():
             return jsonify({"error": f"No data available for stock '{symbol}'."}), 404
 
         # Get last 60 days for prediction
-        recent_data = stock_data.tail(60)[["Open", "Close"]]
+        recent_data = stock_data.tail(60)[["High", "Low"]]  # Change to High and Low
         if recent_data.isnull().values.any():
             return jsonify({"error": "Recent data contains NaN values. Cannot predict."}), 400
 
@@ -206,16 +207,80 @@ def predict_open_close():
 
         # Inverse scale final prediction
         final_prediction = scaler.inverse_transform(pred)[0]
-        predicted_open, predicted_close = float(final_prediction[0]), float(final_prediction[1])  # Convert to standard Python float
+        predicted_high, predicted_low = float(final_prediction[0]), float(final_prediction[1])  # Convert to standard Python float
 
         return jsonify({
             "symbol": symbol,
             "interval": interval,
-            "predicted_open": round(predicted_open, 2),
-            "predicted_close": round(predicted_close, 2)
+            "predicted_high": round(predicted_high, 2),
+            "predicted_low": round(predicted_low, 2)
         })
     except Exception as e:
         return jsonify({"error": f"Failed to generate predictions: {str(e)}"}), 500
+
+    
+
+# @app.route("/predict", methods=["POST"])
+# def predict_open_close():
+#     try:
+#         data = request.json
+#         symbol = data.get("symbol")
+#         interval = data.get("interval")
+
+#         # Map intervals to days
+#         days_map = {
+#             "1 Day": 1,
+#             "1 Week": 7,
+#             "1 Month": 30,
+#             "6 Months": 182,
+#             "1 Year": 365
+#         }
+#         if interval not in days_map:
+#             return jsonify({"error": "Invalid interval. Choose from '1 Day', '1 Week', '1 Month', '6 Months', '1 Year'."}), 400
+
+#         days_ahead = days_map[interval]
+
+#         # Fetch recent stock data
+#         stock_data = yf.download(symbol, period="1y")
+#         if stock_data.empty:
+#             return jsonify({"error": f"No data available for stock '{symbol}'."}), 404
+
+#         # Get last 60 days for prediction
+#         recent_data = stock_data.tail(60)[["Open", "Close"]]
+#         if recent_data.isnull().values.any():
+#             return jsonify({"error": "Recent data contains NaN values. Cannot predict."}), 400
+
+#         # Scale data
+#         scaler = SCALERS.get(symbol)
+#         if not scaler:
+#             return jsonify({"error": f"No scaler found for stock '{symbol}'."}), 500
+#         scaled_data = scaler.transform(recent_data)
+
+#         # Prepare model and weights
+#         model = MODELS.get(symbol)
+#         if not model:
+#             return jsonify({"error": f"No model found for stock '{symbol}'."}), 500
+
+#         # Predict
+#         x_test = np.array([scaled_data])
+#         x_test = x_test.reshape((x_test.shape[0], x_test.shape[1], 2))
+#         for _ in range(days_ahead):
+#             pred = model.predict(x_test)
+#             new_input = np.append(x_test[0][1:], pred, axis=0)
+#             x_test = np.array([new_input])
+
+#         # Inverse scale final prediction
+#         final_prediction = scaler.inverse_transform(pred)[0]
+#         predicted_open, predicted_close = float(final_prediction[0]), float(final_prediction[1])  # Convert to standard Python float
+
+#         return jsonify({
+#             "symbol": symbol,
+#             "interval": interval,
+#             "predicted_open": round(predicted_open, 2),
+#             "predicted_close": round(predicted_close, 2)
+#         })
+#     except Exception as e:
+#         return jsonify({"error": f"Failed to generate predictions: {str(e)}"}), 500
 
 if __name__ == "__main__":
     app.run(debug=True)

@@ -1,7 +1,32 @@
+
 import streamlit as st
-import yfinance as yf
+import requests
 import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+import yfinance as yf
 import numpy as np
+
+# API Configuration
+API_URL = "http://127.0.0.1:5000"  # Flask API base URL
+NIFTY50_COMPANIES = [
+    'RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS',
+    'ICICIBANK.NS', 'HINDUNILVR.NS', 'BAJFINANCE.NS',
+    'SBIN.NS', 'KOTAKBANK.NS', 'BHARTIARTL.NS'
+]
+
+stock_dict = {
+    'RELIANCE': 'RELIANCE.NS',
+    'TCS': 'TCS.NS',
+    'INFY': 'INFY.NS',
+    'HDFCBANK': 'HDFCBANK.NS',
+    'ICICIBANK': 'ICICIBANK.NS',
+    'HINDUNILVR': 'HINDUNILVR.NS',
+    'BAJFINANCE': 'BAJFINANCE.NS',
+    'SBIN': 'SBIN.NS',
+    'KOTAKBANK': 'KOTAKBANK.NS',
+    'BHARTIARTL': 'BHARTIARTL.NS'
+}
 
 # Function to calculate RSI
 def calculate_rsi(data, window=14):
@@ -31,106 +56,149 @@ def generate_recommendations(data):
     data['Recommendation'] = recommendations
     return data
 
-# Streamlit app
-st.title("AI Stock Recommendation System")
-st.write("""
-This app uses *Relative Strength Index (RSI)* and *Moving Averages (MA)* to provide stock trading recommendations.
-""")
+# Navigation
+PAGES = ["Stock Dashboard", "Prediction Page", "Technical Analysis"]
 
-# Main page for user input
-ticker = st.text_input("Enter Stock Ticker", value="AAPL")
-start_date = st.date_input("Start Date", value=pd.to_datetime("2022-01-01"))
-end_date = st.date_input("End Date", value=pd.to_datetime("today") + pd.Timedelta(days=1))  # Add a day ahead to current date
+# App Title and Configuration
+st.set_page_config(page_title="NIFTY50 Stock Analysis", layout="wide")
+st.sidebar.title("Smart Investments: Stock Market Prediction with Machine Learning ")
+selection = st.sidebar.radio("Go to", PAGES)
 
-if st.button("Fetch and Analyze"):
-    # Fetch stock data
-    stock_data = yf.download(ticker, start=start_date, end=end_date)
+# --- PAGE 1: Stock Dashboard ---
+if selection == "Stock Dashboard":
+    st.title("📊 Company Fundamentals Dashboard")
+    user_input = st.selectbox("Select a stock:", list(stock_dict.keys()))
+    ticker = stock_dict.get(user_input.upper(), None)
 
-    # Normalize column names if necessary
-    if isinstance(stock_data.columns, pd.MultiIndex):
-        stock_data.columns = stock_data.columns.get_level_values(0)
+    if st.button("Analyze") and ticker:
+        try:
+            with st.spinner("Fetching data..."):
+                stock = yf.Ticker(ticker)
+                info = stock.info
+                st.subheader(f"{info.get('longName', 'N/A')} ({ticker})")
+                st.write(f"Sector: {info.get('sector', 'N/A')}")
+                st.write(f"Industry: {info.get('industry', 'N/A')}")
+                st.write(f"Market Cap: {info.get('marketCap', 'N/A'):,}")
 
-    # Check if the 'Close' column exists
-    if 'Close' not in stock_data.columns or stock_data['Close'].isnull().all():
-        st.error("No 'Close' data available for the selected ticker and date range.")
+                st.subheader("Stock Price Chart")
+                historical_data = stock.history(period="1y")
+                st.line_chart(historical_data['Close'])
+
+                st.subheader("News and Sentiment")
+                response = requests.get(f"{API_URL}/news/{user_input}")
+                if response.status_code == 200:
+                    news_data = pd.DataFrame(response.json().get("news", []))
+                    st.write(news_data)
+                else:
+                    st.error("Failed to fetch news data.")
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
+
+# --- PAGE 2: Prediction Page ---
+
+elif selection == "Prediction Page":
+    st.header("🔮 Predict Stock Prices")
+
+    # Stock and Interval Selector
+    stock_symbol = st.selectbox("Select Stock", NIFTY50_COMPANIES)
+    interval = st.selectbox("Select Interval", ["1 Day", "1 Week", "1 Month", "6 Months", "1 Year"])
+
+    # Predict Prices Button
+    if st.button("Predict Prices"):
+        try:
+            st.write(f"Fetching predictions for {stock_symbol} ({interval})...")
+            
+            # Call Flask API for prediction
+            response = requests.post(f"{API_URL}/predict_high_low", json={"symbol": stock_symbol, "interval": interval})
+
+            # Check if the response is successful
+            if response.status_code == 200:
+                try:
+                    # Attempt to parse the response as JSON
+                    result = response.json()
+                    predicted_high = result.get("predicted_high")
+                    predicted_low = result.get("predicted_low")
+                    
+                    if predicted_high is None or predicted_low is None:
+                        st.error("Prediction values are missing from the response.")
+                    else:
+                        st.subheader("Predicted Prices")
+                        st.write(f"Predicted High: ₹{predicted_high}")
+                        st.write(f"Predicted Low: ₹{predicted_low}")
+                except ValueError as e:
+                    st.error(f"Error parsing JSON response: {e}")
+                    st.write(f"Raw response: {response.text}")
+            else:
+                st.error(f"Failed to fetch predictions. Status code: {response.status_code}")
+                st.write(f"Error details: {response.text}")
+        except requests.exceptions.RequestException as e:
+            st.error(f"Error fetching predictions: {e}")
+
+
+# --- PAGE 3: Technical Analysis ---
+elif selection == "Technical Analysis":
+    st.title("📈 Technical Analysis")
+
+    # Sidebar Inputs
+    st.sidebar.header("Technical Analysis Inputs")
+    selected_stock = st.sidebar.selectbox("Select a stock:", list(stock_dict.keys()))
+    start_date = st.sidebar.date_input("Start Date", value=datetime.now() - timedelta(days=365))
+    end_date = st.sidebar.date_input("End Date", value=datetime.now())
+    short_window = st.sidebar.slider("Short Moving Average Window", 5, 50, 20)
+    long_window = st.sidebar.slider("Long Moving Average Window", 20, 200, 50)
+    rsi_window = st.sidebar.slider("RSI Calculation Window", 5, 50, 14)
+
+    # Validate Date Inputs
+    if start_date >= end_date:
+        st.error("Start Date must be before End Date.")
     else:
-        # Fill missing data for calculations
-        stock_data['Close'] = stock_data['Close'].fillna(method='ffill').fillna(method='bfill')
+        ticker = stock_dict.get(selected_stock)
 
-        # Calculate RSI and Moving Averages
-        stock_data['RSI'] = calculate_rsi(stock_data)
-        stock_data = calculate_moving_averages(stock_data)
+        if st.sidebar.button("Fetch and Analyze"):
+            try:
+                # Attempt to fetch stock data
+                with st.spinner("Fetching stock data..."):
+                    stock_data = yf.download(ticker, start=start_date, end=end_date)
 
-        # Generate Recommendations
-        stock_data = generate_recommendations(stock_data)
+                # Check if the fetched data is valid
+                if stock_data.empty:
+                    st.error("No data fetched for the selected ticker and date range. Please check your inputs.")
+                else:
+                    # Normalize column names if necessary
+                    if isinstance(stock_data.columns, pd.MultiIndex):
+                        stock_data.columns = stock_data.columns.get_level_values(0)
 
-        # Reverse the data to show the most recent data first
-        stock_data_reversed = stock_data.iloc[::-1]
+                    # Check if the 'Close' column exists
+                    if 'Close' not in stock_data.columns or stock_data['Close'].isnull().all():
+                        st.error("No 'Close' data available for the selected ticker and date range.")
+                    else:
+                        # Fill missing data for calculations
+                        stock_data['Close'] = stock_data['Close'].fillna(method='ffill').fillna(method='bfill')
 
-        # Display data
-        st.subheader(f"Stock Data for {ticker}")
-        st.write(stock_data_reversed)
+                        # Calculate RSI and Moving Averages
+                        stock_data['RSI'] = calculate_rsi(stock_data)
+                        stock_data = calculate_moving_averages(stock_data)
 
-        # Display Recommendations
-        st.subheader("Recommendations")
-        st.write(stock_data_reversed[['RSI', 'Short_MA', 'Long_MA', 'Recommendation']].tail(10))
+                        # Generate Recommendations
+                        stock_data = generate_recommendations(stock_data)
 
-        # Plotting
-        st.subheader("Stock Price with Moving Averages")
-        st.line_chart(stock_data_reversed[['Close', 'Short_MA', 'Long_MA']])
-
-        st.subheader("RSI Over Time")
-        st.line_chart(stock_data_reversed['RSI'])
+                        # Display data
+                        st.subheader(f"Stock Data for {ticker}")
+                        st.write(stock_data.sort_index(ascending=False))
 
 
-# import streamlit as st
-# import requests
-# import pandas as pd
-# import matplotlib.pyplot as plt
-# from datetime import datetime, timedelta
-# import yfinance as yf
+                        # # Display Recommendations
+                        # st.subheader("Recommendations")
+                        # st.write(stock_data[['RSI', 'Short_MA', 'Long_MA', 'Recommendation']].tail(10))
 
-# # API Configuration
-# API_URL = "http://127.0.0.1:5000"  # Flask API base URL
-# NIFTY50_COMPANIES = [
-#     'RELIANCE.NS', 'TCS.NS', 'INFY.NS', 'HDFCBANK.NS',
-#     'ICICIBANK.NS', 'HINDUNILVR.NS', 'BAJFINANCE.NS',
-#     'SBIN.NS', 'KOTAKBANK.NS', 'BHARTIARTL.NS'
-# ]
+                        # Plotting
+                        st.subheader("Stock Price with Moving Averages")
+                        st.line_chart(stock_data[['Close', 'Short_MA', 'Long_MA']])
 
-# st.title("Nifty50 Stock Dashboard")
-# st.subheader("Interactive Stock Price Visualization")
+                        st.subheader("RSI Over Time")
+                        st.line_chart(stock_data['RSI'])
 
-# # Stock Selector
-# stock_symbol = st.selectbox("Select a Stock Symbol", options=NIFTY50_COMPANIES)
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
 
-# # Date Range Selector
-# col1, col2 = st.columns(2)
-# start_date = col1.date_input("Start Date", value=datetime.now() - timedelta(days=365))
-# end_date = col2.date_input("End Date", value=datetime.now())
 
-# # Fetch Stock Data
-# if st.button("Generate Graph"):
-#     try:
-#         st.write(f"Fetching data for *{stock_symbol}* from {start_date} to {end_date}...")
-#         stock_data = yf.download(stock_symbol, start=start_date, end=end_date)
-
-#         if stock_data.empty:
-#             st.warning("No data available for the selected date range.")
-#         else:
-#             st.write("### Closing Price Trend")
-#             fig, ax = plt.subplots(figsize=(10, 6))
-#             ax.plot(stock_data.index, stock_data['Close'], label='Close Price', color='blue', marker='o')
-#             ax.set_title(f"{stock_symbol} Closing Prices")
-#             ax.set_xlabel("Date")
-#             ax.set_ylabel("Price (INR)")
-#             ax.legend()
-#             ax.grid(True)
-#             plt.xticks(rotation=45)
-#             st.pyplot(fig)
-
-#             if st.checkbox("Show Raw Data"):
-#                 st.write("### Raw Data")
-#                 st.dataframe(stock_data)
-#     except Exception as e:
-#         st.error(f"Failed to fetch stock data: {e}")
